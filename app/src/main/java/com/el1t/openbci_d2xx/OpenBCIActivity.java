@@ -57,16 +57,14 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 
 	TextView mTextView;
 
-    StreamReader sr = new StreamReader(this);
-    int framecounter = 0;
+    StreamReader mStreamReader = new StreamReader(this);
 
 	final Handler INIT_HANDLER = new Handler() {
 		@Override
 		public void handleMessage(Message msg) {
 			final byte[] input = (byte[]) msg.obj;
 			final char[] decoded = Arrays.copyOf(Charset.forName("US-ASCII").decode(ByteBuffer.wrap(input)).array(), msg.arg1);
-			mTextView.setText(mTextView.getText() + "\n" + new String(decoded));
-            if (decoded.length > 4 && decoded[decoded.length - 3] == '$' && decoded[decoded.length - 2] == '$' && decoded[decoded.length-1] == '$') {
+			if (decoded.length > 4 && decoded[decoded.length - 3] == '$' && decoded[decoded.length - 2] == '$' && decoded[decoded.length-1] == '$') {
 				mInitialized = true;
                 mTextView.setText(mTextView.getText() + " << EOT received");
 				Log.d(TAG, "EOT received");
@@ -77,6 +75,15 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 						streaming = true;
 					}
 				}, 70);
+				new Handler().postDelayed(new Runnable() {
+					@Override
+					public void run() {
+						writeToDevice(Commands.STOP_STREAM);
+						streaming = false;
+					}
+				}, 3000);
+			} else {
+				Log.d(TAG, new String(decoded));
 			}
 		}
 	};
@@ -86,59 +93,39 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 		public void handleMessage(Message msg) {
 			final byte[] input = (byte[]) msg.obj;
 			System.arraycopy(input, 0, overflowBuffer, overflowLength, input.length);
-			DataPacket[] dataPackets = new DataPacket[(overflowLength + input.length)/PACKET_LENGTH + 1];
-			DataPacket temp;
-			for (int i = 0; i < overflowLength + input.length; i += PACKET_LENGTH) {
-				// Verify integrity
-				if (overflowBuffer[i] != (byte) 0xA0 || overflowBuffer[i+32] != (byte) 0xC0) {
-					Log.d(TAG, "Invalid header/footer in packet");
-					continue;
+			if ((overflowLength + input.length)/PACKET_LENGTH > 0) {
+//				DataPacket[] dataPackets = new DataPacket[(overflowLength + input.length)/PACKET_LENGTH];
+				DataPacket temp;
+				int index;
+				for (index = 0; index + PACKET_LENGTH < overflowLength + input.length; index += PACKET_LENGTH) {
+					// Verify integrity
+					if (overflowBuffer[index] != (byte) 0xA0 || overflowBuffer[index + PACKET_LENGTH - 1] != (byte) 0xC0) {
+						Log.d(TAG, "Invalid header/footer in packet");
+						continue;
+					}
+					temp = new DataPacket(8, 3);
+					temp.sampleIndex = (int) overflowBuffer[index + 1];
+					for (int j = index + 2; j < index + 26; j += 3) {
+						temp.values[(j - index - 2) / 3] = interpret24bitAsInt32(overflowBuffer[j],
+								overflowBuffer[j + 1], overflowBuffer[j + 2]);
+					}
+					for (int j = index + 26; j < index + PACKET_LENGTH; j += 2) {
+						temp.values[(j - index - 26) / 2] = interpret16bitAsInt32(overflowBuffer[j], overflowBuffer[j + 1]);
+					}
+//					dataPackets[index / PACKET_LENGTH] = temp;
+//					temp.printToConsole();
+					mStreamReader.addFrame(temp.values[0]);
 				}
-				temp = new DataPacket(8, 3);
-				temp.sampleIndex = (int) overflowBuffer[i + 1];
-				for (int j = i + 2; j < i + 26; j+=3) {
-					temp.values[(j - i - 2)/3] = interpret24bitAsInt32(overflowBuffer[j], overflowBuffer[j+1], overflowBuffer[j+2]);
-				}
-				for (int j = i + 26; j < i + PACKET_LENGTH; j+=2) {
-					temp.values[(j - i - 26)/2] = interpret16bitAsInt32(overflowBuffer[j], overflowBuffer[j+1]);
-				}
-				dataPackets[i/PACKET_LENGTH] = temp;
-				temp.printToConsole();
-                sr.addFrame(temp.values[0]);
-                framecounter++;
-                if (framecounter >= 50) {
-                    mTextView.setText(mTextView.getText() + "\n" + "Scanning");
-                    sr.scan();
-                    framecounter = 0;
-                }
+				// Move data to the beginning of the buffer
+				System.arraycopy(overflowBuffer, index, overflowBuffer, 0, overflowLength + input.length - index);
+				overflowLength += input.length - index;
+			} else {
+				overflowLength += input.length;
 			}
-			overflowLength = (overflowLength + input.length) % PACKET_LENGTH;
-			// Move data to the beginning
-			System.arraycopy(overflowBuffer, overflowLength + input.length, overflowBuffer, 0, overflowLength);
 		}
 	};
 
-    @Override
-    public void blinkStart() {
-        mTextView.setText(mTextView.getText() + "\n" + "Blink Start");
-    }
-
-    @Override
-    public void blinkEnd(double blinkDuration) {
-        mTextView.setText(mTextView.getText() + "\n" + "Blink End: " + blinkDuration + " sec");
-    }
-
-    @Override
-    public void alphaStart() {
-
-    }
-
-    @Override
-    public void alphaEnd(double alphaDuraction) {
-
-    }
-
-    @Override
+	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_bci);
@@ -156,6 +143,7 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 		filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
 		filter.setPriority(500);
 		registerReceiver(mUsbReceiver, filter);
+		Log.d(TAG, "Driver initialized");
 
 		// Use material design toolbar
 		final Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
@@ -171,12 +159,6 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 		}
 	}
 
-	private void SetupD2xxLibrary () {
-		if(!sManager.setVIDPID(0x0403, 0xada1)) {
-			Log.d("ftd2xx-java", "setVIDPID Error");
-		}
-	}
-
 	/***********USB broadcast receiver*******************************************/
 	private final BroadcastReceiver mUsbReceiver = new BroadcastReceiver() {
 		@Override
@@ -187,6 +169,32 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 			}
 		}
 	};
+
+	@Override
+	public void blinkStart() {
+		mTextView.setText(mTextView.getText() + "\n" + "Blink Start");
+	}
+
+	@Override
+	public void blinkEnd(double blinkDuration) {
+		mTextView.setText(mTextView.getText() + "\n" + "Blink End: " + blinkDuration + " sec");
+	}
+
+	@Override
+	public void alphaStart() {
+
+	}
+
+	@Override
+	public void alphaEnd(double alphaDuraction) {
+
+	}
+
+	private void SetupD2xxLibrary () {
+		if(!sManager.setVIDPID(0x0403, 0xada1)) {
+			Log.d("ftd2xx-java", "setVIDPID Error");
+		}
+	}
 
 	// Run read operations on separate thread
 	private class ReadThread extends Thread {
@@ -417,20 +425,14 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 		Log.d(TAG, "Config finished");
 		mUartConfigured = true;
 		enableRead();
-		new Handler().postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                writeToDevice(Commands.SOFT_RESET);
-                streaming = false;
-            }
-        }, 3000);
+		streaming = false;
 		new Handler().postDelayed(new Runnable() {
 			@Override
 			public void run() {
-				writeToDevice(Commands.STOP_STREAM);
+				writeToDevice(Commands.SOFT_RESET);
 				streaming = false;
 			}
-		}, 7000);
+		}, 3000);
 	}
 
 	private int interpret24bitAsInt32(byte a, byte b, byte c) {

@@ -22,6 +22,7 @@ public class StreamReader {
 	private int fallingEdge = 0;
 
 	private int lastDown = -1;
+	private int frameCount = 0;
 
     private BrainStateCallback mCallback;
 
@@ -39,6 +40,10 @@ public class StreamReader {
 		index++;
 		index = index%(WINDOW_SIZE+DIF_SIZE);
 		indexTotal++;
+		if (frameCount++ > 50) {
+			scan();
+			frameCount = 0;
+		}
 	}
 
 	public void scan() {
