@@ -1,3 +1,5 @@
+package com.el1t.openbci_d2xx;
+
 public class StreamReader {
 	private final int WINDOW_SIZE = 100;
 	private final int DIF_SIZE = 10;
@@ -20,6 +22,12 @@ public class StreamReader {
 	private int fallingEdge = 0;
 
 	private int lastDown = -1;
+
+    private BrainStateCallback mCallback;
+
+    public StreamReader(BrainStateCallback bsc) {
+        mCallback = bsc;
+    }
 
 	public void addFrame(double frame) {
 		windowR[index] = frame;
@@ -54,7 +62,8 @@ public class StreamReader {
 						dupes[dupeIndex%DUPE_SIZE] = val;
 						dupeIndex++;
 						if (lastDown > 0) {
-							System.out.println("BLINK OCCURRED FOR "+(absolt-lastDown)/SAMPLE_RATE+" SECONDS");
+							mCallback.blinkEnd(Math.abs((absolt-lastDown)/SAMPLE_RATE));
+                            System.out.println("BLINK OCCURRED FOR "+(absolt-lastDown)/SAMPLE_RATE+" SECONDS");
 							lastDown = -1;
 						}
 						mode = 0;
@@ -66,6 +75,7 @@ public class StreamReader {
 				if (actual >= -THRESHOLD) {
 					double val = ((absolt-fallingEdge)/2.0+fallingEdge);
 					if (!dupeContains(val)) {
+						mCallback.blinkStart();
 						//System.out.println("BLINK BEGAN AT FRAME: "+val+" WITH BOUNDRIES "+fallingEdge+" & "+absolt);
 						dupes[dupeIndex%DUPE_SIZE] = val;
 						dupeIndex++;

@@ -24,7 +24,7 @@ import java.util.Arrays;
 /**
  * Created by El1t on 1/16/15.
  */
-public class OpenBCIActivity extends ActionBarActivity
+public class OpenBCIActivity extends ActionBarActivity implements BrainStateCallback
 {
 	private final static String TAG = "OpenBCI Test Activity";
 	final static byte BYTE_START = (byte) 0xA0;
@@ -57,13 +57,18 @@ public class OpenBCIActivity extends ActionBarActivity
 
 	TextView mTextView;
 
+    StreamReader sr = new StreamReader(this);
+    int framecounter = 0;
+
 	final Handler INIT_HANDLER = new Handler() {
 		@Override
 		public void handleMessage(Message msg) {
 			final byte[] input = (byte[]) msg.obj;
 			final char[] decoded = Arrays.copyOf(Charset.forName("US-ASCII").decode(ByteBuffer.wrap(input)).array(), msg.arg1);
-			if (decoded.length > 4 && decoded[decoded.length - 3] == '$' && decoded[decoded.length - 2] == '$' && decoded[decoded.length-1] == '$') {
+			mTextView.setText(mTextView.getText() + "\n" + new String(decoded));
+            if (decoded.length > 4 && decoded[decoded.length - 3] == '$' && decoded[decoded.length - 2] == '$' && decoded[decoded.length-1] == '$') {
 				mInitialized = true;
+                mTextView.setText(mTextView.getText() + " << EOT received");
 				Log.d(TAG, "EOT received");
 				new Handler().postDelayed(new Runnable() {
 					@Override
@@ -99,6 +104,13 @@ public class OpenBCIActivity extends ActionBarActivity
 				}
 				dataPackets[i/PACKET_LENGTH] = temp;
 				temp.printToConsole();
+                sr.addFrame(temp.values[0]);
+                framecounter++;
+                if (framecounter >= 50) {
+                    mTextView.setText(mTextView.getText() + "\n" + "Scanning");
+                    sr.scan();
+                    framecounter = 0;
+                }
 			}
 			overflowLength = (overflowLength + input.length) % PACKET_LENGTH;
 			// Move data to the beginning
@@ -106,7 +118,27 @@ public class OpenBCIActivity extends ActionBarActivity
 		}
 	};
 
-	@Override
+    @Override
+    public void blinkStart() {
+        mTextView.setText(mTextView.getText() + "\n" + "Blink Start");
+    }
+
+    @Override
+    public void blinkEnd(double blinkDuration) {
+        mTextView.setText(mTextView.getText() + "\n" + "Blink End: " + blinkDuration + " sec");
+    }
+
+    @Override
+    public void alphaStart() {
+
+    }
+
+    @Override
+    public void alphaEnd(double alphaDuraction) {
+
+    }
+
+    @Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_bci);
@@ -386,12 +418,12 @@ public class OpenBCIActivity extends ActionBarActivity
 		mUartConfigured = true;
 		enableRead();
 		new Handler().postDelayed(new Runnable() {
-			@Override
-			public void run() {
-				writeToDevice(Commands.SOFT_RESET);
-				streaming = false;
-			}
-		}, 3000);
+            @Override
+            public void run() {
+                writeToDevice(Commands.SOFT_RESET);
+                streaming = false;
+            }
+        }, 3000);
 		new Handler().postDelayed(new Runnable() {
 			@Override
 			public void run() {
