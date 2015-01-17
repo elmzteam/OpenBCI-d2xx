@@ -11,28 +11,37 @@ import android.os.Message;
 import android.support.v7.app.ActionBarActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.ftdi.j2xx.D2xxManager;
 import com.ftdi.j2xx.FT_Device;
 
 import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.charset.Charset;
+import java.util.Arrays;
 
 /**
  * Created by El1t on 1/16/15.
  */
 public class OpenBCIActivity extends ActionBarActivity
 {
-	public static D2xxManager sManager = null;
-	static final int readLength = 512;
+	private final static String TAG = "OpenBCI Test Activity";
+	final static byte BYTE_START = (byte) 0xA0;
+	final static byte BYTE_END = (byte) 0xC0;
 
-	/*local variables*/
-	int mBaudRate = 115200; /*baud rate*/
-	byte mStopBit = D2xxManager.FT_STOP_BITS_1; /*1:1stop bits, 2:2 stop bits*/
-	byte mDataBit = D2xxManager.FT_DATA_BITS_8; /*8:8bit, 7: 7bit*/
-	byte mParity = D2xxManager.FT_PARITY_NONE;  /* 0: none, 1: odd, 2: even, 3: mark, 4: space*/
-	byte mFlowControl = D2xxManager.FT_FLOW_NONE; /*0:none, 1: flow control(CTS,RTS)*/
+	// D2xx settings
+	static final int MAX_READ_LENGTH = 512;
+	static final int PACKET_LENGTH = 33;
+	static D2xxManager sManager = null;
+	boolean streaming;
+	int mBaudRate = 115200;
+	byte mStopBit = D2xxManager.FT_STOP_BITS_1;
+	byte mDataBit = D2xxManager.FT_DATA_BITS_8;
+	byte mParity = D2xxManager.FT_PARITY_NONE;
+	byte mFlowControl = D2xxManager.FT_FLOW_NONE;
 
 	int mDevCount = -1;
 	int mDevCurrentIndex = -1;
@@ -44,7 +53,31 @@ public class OpenBCIActivity extends ActionBarActivity
 	FT_Device mDevice = null;
 	boolean mUartConfigured = false;
 
-	private final static String TAG = "OpenBCI Test Activity";
+	TextView mTextView;
+
+	final Handler INIT_HANDLER = new Handler() {
+		@Override
+		public void handleMessage(Message msg) {
+			final byte[] input = (byte[]) msg.obj;
+			final char[] decoded = Arrays.copyOf(Charset.forName("US-ASCII").decode(ByteBuffer.wrap(input)).array(), msg.arg1);
+			Log.d(TAG, new String(decoded));
+		}
+	};
+
+	final Handler PACKET_HANDLER = new Handler() {
+		@Override
+		public void handleMessage(Message msg) {
+			final byte[] input = (byte[]) msg.obj;
+			// Verify integrity
+			if (input.length != 132) {
+				Log.d(TAG, "Invalid packet");
+				return;
+			}
+			for (int i = 0; i < input.length; i++) {
+
+			}
+		}
+	};
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -57,12 +90,13 @@ public class OpenBCIActivity extends ActionBarActivity
 			ex.printStackTrace();
 		}
 		SetupD2xxLibrary();
+		mTextView = (TextView) findViewById(R.id.console);
 
 		final IntentFilter filter = new IntentFilter();
 		filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
 		filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
 		filter.setPriority(500);
-		this.registerReceiver(mUsbReceiver, filter);
+		registerReceiver(mUsbReceiver, filter);
 
 		// Use material design toolbar
 		final Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
@@ -99,14 +133,15 @@ public class OpenBCIActivity extends ActionBarActivity
 	private class ReadThread extends Thread {
 		Handler mHandler;
 
+		// Uses default handler that interprets bytes as a char array
 		public ReadThread() {
 			mHandler = new Handler() {
 				@Override
 				public void handleMessage(Message msg) {
-					if(msg.arg1 > 0) {
-//						char[] input = (char[]) msg.obj;
-//						readText.append(String.copyValueOf(readDataToText, 0, msg.arg1));
-						Log.d(TAG, "Output: " + new String((char[]) msg.obj));
+					try {
+						Log.d(TAG, "Output: " + new String((byte[]) msg.obj, "US-ASCII"));
+					} catch (UnsupportedEncodingException e) {
+						Log.e(TAG, "Default read handler", e);
 					}
 				}
 			};
@@ -120,39 +155,36 @@ public class OpenBCIActivity extends ActionBarActivity
 
 		@Override
 		public void run() {
-			final byte[] readData = new byte[readLength];
-			CharBuffer charBuffer;
-			int iavailable;
+			byte[] readData;
+			int dataLength;
 
 			while(!isInterrupted()) {
 				try {
-					Thread.sleep(4);
+					Thread.sleep(5);
 				} catch (InterruptedException e) {
 					break;
 				}
 
 				synchronized(mDevice) {
-					iavailable = mDevice.getQueueStatus();
-					if (iavailable > 0) {
-						if (iavailable > readLength) {
-							iavailable = readLength;
+					dataLength = mDevice.getQueueStatus();
+					if (dataLength > 0) {
+						if (dataLength > MAX_READ_LENGTH) {
+							dataLength = MAX_READ_LENGTH;
 						}
 
-						mDevice.read(readData, iavailable);
-						try {
-							Log.d(TAG, new String(readData, "US-ASCII"));
-						} catch (UnsupportedEncodingException e) {
-							Log.e(TAG, "Encoding error", e);
-						}
-						//charBuffer  = Charset.forName("US-ASCII").decode(ByteBuffer.wrap(readData));
-						//Message msg = mHandler.obtainMessage();
-						//msg.obj = Arrays.copyOfRange(charBuffer.array(), charBuffer.position(), charBuffer.limit());
-//						//msg.obj = readData[0];
-						//msg.arg1 = iavailable;
-						//mHandler.sendMessage(msg);
+						readData = new byte[dataLength];
+						mDevice.read(readData, dataLength);
+
+						// Object: byte array
+						// Arg1: length of array
+						Message msg = mHandler.obtainMessage();
+						msg.obj = readData;
+						msg.arg1 = dataLength;
+						mHandler.sendMessage(msg);
 					}
 				}
 			}
+			Log.d(TAG, "Reading thread stopped");
 		}
 	}
 
@@ -164,7 +196,7 @@ public class OpenBCIActivity extends ActionBarActivity
 		disconnect();
 	}
 
-	public void createDeviceList() {
+	public boolean createDeviceList() {
 		int tempDevCount = sManager.createDeviceInfoList(this);
 
 		if (mDevCount != tempDevCount) {
@@ -172,7 +204,9 @@ public class OpenBCIActivity extends ActionBarActivity
 		} else if (tempDevCount < 0) {
 			mDevCount = -1;
 			mDevCurrentIndex = -1;
+			return false;
 		}
+		return mDevCount > 0;
 	}
 
 	public void disconnect() {
@@ -183,7 +217,8 @@ public class OpenBCIActivity extends ActionBarActivity
 			Thread.sleep(50);
 		}
 		catch (InterruptedException e) {
-			e.printStackTrace();
+//			e.printStackTrace();
+			Log.d(TAG, "Thread interrupted");
 		}
 
 		if(mDevice != null) {
@@ -237,6 +272,7 @@ public class OpenBCIActivity extends ActionBarActivity
 			Log.d(TAG, "Read disabled");
 		} else {
 			mDevice.purge(D2xxManager.FT_PURGE_TX);
+			mDevice.purge(D2xxManager.FT_PURGE_RX);
 			mDevice.restartInTask();
 			Log.d(TAG, "Read enabled");
 		}
@@ -247,8 +283,9 @@ public class OpenBCIActivity extends ActionBarActivity
 	public void writeToDevice(char value) {
 		if (mDevice != null && mDevice.isOpen()) {
 			mDevice.setLatencyTimer((byte) 16);
-			mDevice.write(new byte[] { (byte) value }, 1);
+			mDevice.write(new byte[]{(byte) value}, 1);
 			Log.d(TAG, "Sent '" + value + "' to device.");
+			mTextView.setText(mTextView.getText() + "\nSent '" + value + "' to device.");
 		} else {
 			Log.e(TAG, "Write: mDevice not open");
 		}
@@ -274,11 +311,17 @@ public class OpenBCIActivity extends ActionBarActivity
 	public void onResume() {
 		super.onResume();
 		mDevCount = 0;
-		createDeviceList();
-		if (mDevCount > 0) {
+		if (createDeviceList()) {
 			connect();
 			setConfig(mBaudRate, mDataBit, mStopBit, mParity, mFlowControl);
 		}
+	}
+
+	@Override
+	public void onDestroy() {
+		super.onDestroy();
+		disconnect();
+		unregisterReceiver(mUsbReceiver);
 	}
 
 	public void setConfig(int baudRate, byte dataBit, byte stopBit, byte parity, byte flowControl) {
@@ -301,15 +344,17 @@ public class OpenBCIActivity extends ActionBarActivity
 		mDevice.setFlowControl(flowControl, (byte) 0x0b, (byte) 0x0d);
 		mFlowControl = flowControl;
 
-		Toast.makeText(this, "Config done", Toast.LENGTH_SHORT).show();
+		Log.d(TAG, "Config finished");
 		mUartConfigured = true;
 		enableRead();
-		writeToDevice('v');
+		streaming = false;
+		writeToDevice(Commands.SOFT_RESET);
 		new Handler().postDelayed(new Runnable() {
 			@Override
 			public void run() {
-				writeToDevice('b');
+				streaming = true;
+				writeToDevice(Commands.START_STREAM);
 			}
-		}, 1000);
+		}, 7000);
 	}
 }
