@@ -50,6 +50,7 @@ public class OpenBCIActivity extends ActionBarActivity
 
 	FT_Device mDevice = null;
 	boolean mUartConfigured = false;
+	boolean mInitialized;
 
 	byte[] overflowBuffer = new byte[MAX_READ_LENGTH*2];
 	int overflowLength = 0;
@@ -61,7 +62,17 @@ public class OpenBCIActivity extends ActionBarActivity
 		public void handleMessage(Message msg) {
 			final byte[] input = (byte[]) msg.obj;
 			final char[] decoded = Arrays.copyOf(Charset.forName("US-ASCII").decode(ByteBuffer.wrap(input)).array(), msg.arg1);
-			Log.d(TAG, new String(new char[] {decoded[decoded.length - 2], decoded[decoded.length-1]}));
+			if (decoded.length > 4 && decoded[decoded.length - 3] == '$' && decoded[decoded.length - 2] == '$' && decoded[decoded.length-1] == '$') {
+				mInitialized = true;
+				Log.d(TAG, "EOT received");
+				new Handler().postDelayed(new Runnable() {
+					@Override
+					public void run() {
+						writeToDevice(Commands.START_STREAM);
+						streaming = true;
+					}
+				}, 70);
+			}
 		}
 	};
 
@@ -194,14 +205,14 @@ public class OpenBCIActivity extends ActionBarActivity
 
 						// Object: byte array
 						// Arg1: length of array
-						if (streaming) {
+						if (streaming || overflowLength > 0) {
 							msg = PACKET_HANDLER.obtainMessage();
 						} else {
 							msg = INIT_HANDLER.obtainMessage();
 						}
 						msg.obj = readData;
 						msg.arg1 = dataLength;
-						if (streaming) {
+						if (streaming || overflowLength > 0) {
 							PACKET_HANDLER.sendMessage(msg);
 						} else {
 							INIT_HANDLER.sendMessage(msg);
@@ -294,6 +305,7 @@ public class OpenBCIActivity extends ActionBarActivity
 		}
 		if(readEnabled) {
 			mDevice.stopInTask();
+			mDevice.purge(D2xxManager.FT_PURGE_RX);
 			Log.d(TAG, "Read disabled");
 		} else {
 			mDevice.purge(D2xxManager.FT_PURGE_TX);
@@ -373,13 +385,18 @@ public class OpenBCIActivity extends ActionBarActivity
 		Log.d(TAG, "Config finished");
 		mUartConfigured = true;
 		enableRead();
-		streaming = false;
-		writeToDevice(Commands.SOFT_RESET);
 		new Handler().postDelayed(new Runnable() {
 			@Override
 			public void run() {
-				streaming = true;
-				writeToDevice(Commands.START_STREAM);
+				writeToDevice(Commands.SOFT_RESET);
+				streaming = false;
+			}
+		}, 3000);
+		new Handler().postDelayed(new Runnable() {
+			@Override
+			public void run() {
+				writeToDevice(Commands.STOP_STREAM);
+				streaming = false;
 			}
 		}, 7000);
 	}
