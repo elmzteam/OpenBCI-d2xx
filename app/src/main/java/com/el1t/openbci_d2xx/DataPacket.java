@@ -22,7 +22,7 @@ public class DataPacket {
 		auxValues = new int[nAuxValues];
 	}
 
-	public int printToConsole() {
+	public void printToConsole() {
 		System.out.print("printToConsole: DataPacket = ");
 		System.out.print(sampleIndex);
 		for (int value : values) {
@@ -32,7 +32,6 @@ public class DataPacket {
 			System.out.print(", " + auxValue);
 		}
 		System.out.println();
-		return 0;
 	}
 
 	public int copyTo(DataPacket target) {
