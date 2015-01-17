@@ -55,6 +55,11 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 	byte[] overflowBuffer = new byte[MAX_READ_LENGTH*2];
 	int overflowLength = 0;
 
+	private final float mVref = 4.5f;
+	private final double mAccelScale = 0.002d / Math.pow(2,4);
+	private double mGain = 24d;
+	private double mVoltScale = mVref / (Math.pow(2,23)-1) / mGain * 1000000;
+
 	TextView mTextView;
 
     StreamReader mStreamReader = new StreamReader(this);
@@ -81,7 +86,7 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 						writeToDevice(Commands.STOP_STREAM);
 						streaming = false;
 					}
-				}, 3000);
+				}, 20000);
 			} else {
 				Log.d(TAG, new String(decoded));
 			}
@@ -107,13 +112,13 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 					temp.sampleIndex = (int) overflowBuffer[index + 1];
 					for (int j = index + 2; j < index + 26; j += 3) {
 						temp.values[(j - index - 2) / 3] = interpret24bitAsInt32(overflowBuffer[j],
-								overflowBuffer[j + 1], overflowBuffer[j + 2]);
+								overflowBuffer[j + 1], overflowBuffer[j + 2]) * mVoltScale;
 					}
 					for (int j = index + 26; j < index + PACKET_LENGTH; j += 2) {
-						temp.values[(j - index - 26) / 2] = interpret16bitAsInt32(overflowBuffer[j], overflowBuffer[j + 1]);
+						temp.values[(j - index - 26) / 2] = interpret16bitAsInt32(overflowBuffer[j], overflowBuffer[j + 1]) * mAccelScale;
 					}
 //					dataPackets[index / PACKET_LENGTH] = temp;
-//					temp.printToConsole();
+					temp.printToConsole();
 					mStreamReader.addFrame(temp.values[0]);
 				}
 				// Move data to the beginning of the buffer
@@ -186,7 +191,7 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 	}
 
 	@Override
-	public void alphaEnd(double alphaDuraction) {
+	public void alphaEnd(double alphaDuration) {
 
 	}
 
@@ -426,6 +431,7 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 		mUartConfigured = true;
 		enableRead();
 		streaming = false;
+		overflowLength = 0;
 		new Handler().postDelayed(new Runnable() {
 			@Override
 			public void run() {
@@ -445,7 +451,7 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 	}
 
 	private int interpret16bitAsInt32(byte a, byte b) {
-		int newInt = ((0xFF & a) << 8) | (0xFF & b);
+		final int newInt = ((0xFF & a) << 8) | (0xFF & b);
 		if ((newInt & 0x00008000) > 0) {
 			return newInt | 0xFFFF0000;
 		}

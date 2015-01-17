@@ -10,25 +10,25 @@ package com.el1t.openbci_d2xx;
 
 public class DataPacket {
 	int sampleIndex;
-	int[] values;
-	int[] auxValues;
+	double[] values;
+	double[] auxValues;
 
 	//constructor, give it "nValues", which should match the number of values in the
 	//data payload in each data packet from the Arduino.  This is likely to be at least
 	//the number of EEG channels in the OpenBCI system (ie, 8 channels if a single OpenBCI
 	//board) plus whatever auxiliary data the Arduino is sending.
 	public DataPacket(int nValues, int nAuxValues) {
-		values = new int[nValues];
-		auxValues = new int[nAuxValues];
+		values = new double[nValues];
+		auxValues = new double[nAuxValues];
 	}
 
 	public void printToConsole() {
 		System.out.print("printToConsole: DataPacket = ");
 		System.out.print(sampleIndex);
-		for (int value : values) {
+		for (double value : values) {
 			System.out.print(", " + value);
 		}
-		for (int auxValue : auxValues) {
+		for (double auxValue : auxValues) {
 			System.out.print(", " + auxValue);
 		}
 		System.out.println();
