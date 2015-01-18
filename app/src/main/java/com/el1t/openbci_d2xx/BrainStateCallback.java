@@ -6,6 +6,5 @@ package com.el1t.openbci_d2xx;
 public interface BrainStateCallback {
     public void blinkStart();
     public void blinkEnd(double blinkDuration);
-    public void alphaStart();
-    public void alphaEnd(double alphaDuraction);
+    public void alpha(AlphaDetector.DetectionData_FreqDomain[] results);
 }

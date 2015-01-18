@@ -24,6 +24,8 @@ public class StreamReader {
 	private int lastDown = -1;
 	private int frameCount = 0;
 
+    private boolean waitOne = true;
+
     private BrainStateCallback mCallback;
 
     public StreamReader(BrainStateCallback bsc) {
@@ -40,10 +42,13 @@ public class StreamReader {
 		index++;
 		index = index%(WINDOW_SIZE+DIF_SIZE);
 		indexTotal++;
-		if (frameCount++ > 50) {
+		if (frameCount++ > 50 && !waitOne) {
 			scan();
 			frameCount = 0;
 		}
+        if (waitOne) {
+            waitOne = false;
+        }
 	}
 
 	public void scan() {
@@ -80,13 +85,13 @@ public class StreamReader {
 				if (actual >= -THRESHOLD) {
 					double val = ((absolt-fallingEdge)/2.0+fallingEdge);
 					if (!dupeContains(val)) {
-						mCallback.blinkStart();
 						//System.out.println("BLINK BEGAN AT FRAME: "+val+" WITH BOUNDRIES "+fallingEdge+" & "+absolt);
 						dupes[dupeIndex%DUPE_SIZE] = val;
 						dupeIndex++;
 						if (lastDown < 0) {
 							lastDown = absolt;
-						}
+                            mCallback.blinkStart();
+                        }
 						mode = 0;
 						leadingEdge = 0;
 						fallingEdge = 0;

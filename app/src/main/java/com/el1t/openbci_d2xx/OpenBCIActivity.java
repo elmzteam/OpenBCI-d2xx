@@ -55,21 +55,26 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 	byte[] overflowBuffer = new byte[MAX_READ_LENGTH*2];
 	int overflowLength = 0;
 
+    int[] alphaCheckChannels = {7-1,8-1};
+
 	private final float mVref = 4.5f;
 	private final double mAccelScale = 0.002d / Math.pow(2,4);
-	private double mGain = 24d;
-	private double mVoltScale = mVref / (Math.pow(2,23)-1) / mGain * 1000000;
+	private float mGain = 24.0f;
+	private float mVoltScale = mVref / (float)(Math.pow(2,23)-1) / mGain * 1000000;
 
 	TextView mTextView;
+    TextView mDataView;
 
     StreamReader mStreamReader = new StreamReader(this);
+    AlphaDetector mAlphaDetector = new AlphaDetector(this, alphaCheckChannels.length);
 
 	final Handler INIT_HANDLER = new Handler() {
 		@Override
 		public void handleMessage(Message msg) {
 			final byte[] input = (byte[]) msg.obj;
 			final char[] decoded = Arrays.copyOf(Charset.forName("US-ASCII").decode(ByteBuffer.wrap(input)).array(), msg.arg1);
-			if (decoded.length > 4 && decoded[decoded.length - 3] == '$' && decoded[decoded.length - 2] == '$' && decoded[decoded.length-1] == '$') {
+			mTextView.setText(mTextView.getText() + "\n" + new String(decoded));
+            if (decoded.length > 4 && decoded[decoded.length - 3] == '$' && decoded[decoded.length - 2] == '$' && decoded[decoded.length-1] == '$') {
 				mInitialized = true;
                 mTextView.setText(mTextView.getText() + " << EOT received");
 				Log.d(TAG, "EOT received");
@@ -86,7 +91,7 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 						writeToDevice(Commands.STOP_STREAM);
 						streaming = false;
 					}
-				}, 20000);
+				}, 7000);
 			} else {
 				Log.d(TAG, new String(decoded));
 			}
@@ -111,15 +116,18 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 					temp = new DataPacket(8, 3);
 					temp.sampleIndex = (int) overflowBuffer[index + 1];
 					for (int j = index + 2; j < index + 26; j += 3) {
-						temp.values[(j - index - 2) / 3] = interpret24bitAsInt32(overflowBuffer[j],
-								overflowBuffer[j + 1], overflowBuffer[j + 2]) * mVoltScale;
+                        //Log.d(TAG + " BytesBeforeData", Arrays.toString(Arrays.copyOfRange(overflowBuffer, j , j+3)));
+                        temp.values[(j - index - 2) / 3] = interpret24bitAsInt32(Arrays.copyOfRange(overflowBuffer, j, j+3))*mVoltScale;
 					}
-					for (int j = index + 26; j < index + PACKET_LENGTH; j += 2) {
-						temp.values[(j - index - 26) / 2] = interpret16bitAsInt32(overflowBuffer[j], overflowBuffer[j + 1]) * mAccelScale;
+					for (int j = index + 26; j < index + PACKET_LENGTH - 1; j += 2) {
+                        //Log.d(TAG + " BytesBeforeAux", Arrays.toString(Arrays.copyOfRange(overflowBuffer, j , j+2)));
+                        temp.auxValues[(j - index - 26) / 2] = interpret16bitAsInt32(Arrays.copyOfRange(overflowBuffer, j, j+2));
 					}
 //					dataPackets[index / PACKET_LENGTH] = temp;
-					temp.printToConsole();
-					mStreamReader.addFrame(temp.values[0]);
+					//temp.printToConsole();
+                    //mDataView.setText(Double.toString(temp.values[0]));
+                    Log.d(TAG, Double.toString(temp.values[0]));
+					analyze(temp);
 				}
 				// Move data to the beginning of the buffer
 				System.arraycopy(overflowBuffer, index, overflowBuffer, 0, overflowLength + input.length - index);
@@ -130,7 +138,31 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 		}
 	};
 
-	@Override
+
+    void analyze(DataPacket dp) {
+        mStreamReader.addFrame(dp.values[0]);
+        mAlphaDetector.addFrames(new float[]{(float)dp.values[alphaCheckChannels[0]],(float)dp.values[alphaCheckChannels[1]]});
+    }
+
+
+    int interpret24bitAsInt32(byte[] byteArray) {
+        return 0x10000*byteArray[0] + 0x100*byteArray[1] + 0x1*byteArray[2];
+    }
+
+    int interpret16bitAsInt32(byte[] byteArray) {
+        int newInt = (
+                ((0xFF & byteArray[0]) << 8) |
+                        (0xFF & byteArray[1])
+        );
+//        if ((newInt & 0x00008000) > 0) {
+//            newInt |= 0xFFFF0000;
+//        } else {
+//            newInt &= 0x0000FFFF;
+//        }
+        return newInt;
+    }
+
+    @Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.activity_bci);
@@ -142,6 +174,7 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 		}
 		SetupD2xxLibrary();
 		mTextView = (TextView) findViewById(R.id.console);
+        mDataView = (TextView) findViewById(R.id.dataview);
 
 		final IntentFilter filter = new IntentFilter();
 		filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
@@ -182,18 +215,17 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 
 	@Override
 	public void blinkEnd(double blinkDuration) {
-		mTextView.setText(mTextView.getText() + "\n" + "Blink End: " + blinkDuration + " sec");
+		mTextView.setText(mTextView.getText() + "\n" + "Blink Occurred for " + blinkDuration + " sec");
 	}
 
 	@Override
-	public void alphaStart() {
-
-	}
-
-	@Override
-	public void alphaEnd(double alphaDuration) {
-
-	}
+	public void alpha(AlphaDetector.DetectionData_FreqDomain[] results) {
+        for (int Ichan = 0; Ichan < results.length; Ichan++) {
+            if (results[Ichan].isDetected) {
+                mTextView.setText(mTextView.getText() + "\n" + "Alpha Detected: Channel " + Ichan);
+            }
+        }
+    }
 
 	private void SetupD2xxLibrary () {
 		if(!sManager.setVIDPID(0x0403, 0xada1)) {
@@ -441,20 +473,20 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 		}, 3000);
 	}
 
-	private int interpret24bitAsInt32(byte a, byte b, byte c) {
-		//little endian
-		final int newInt = ((0xFF & a) << 16) | ((0xFF & b) << 8) | 0xFF & c;
-		if ((newInt & 0x00800000) > 0) {
-			return newInt | 0xFF000000;
-		}
-		return newInt & 0x00FFFFFF;
-	}
-
-	private int interpret16bitAsInt32(byte a, byte b) {
-		final int newInt = ((0xFF & a) << 8) | (0xFF & b);
-		if ((newInt & 0x00008000) > 0) {
-			return newInt | 0xFFFF0000;
-		}
-		return newInt & 0x0000FFFF;
-	}
+//	private int interpret24bitAsInt32(byte a, byte b, byte c) {
+//		//little endian
+//		final int newInt = ((0xFF & a) << 16) | ((0xFF & b) << 8) | 0xFF & c;
+//		if ((newInt & 0x00800000) > 0) {
+//			return newInt | 0xFF000000;
+//		}
+//		return newInt & 0x00FFFFFF;
+//	}
+//
+//	private int interpret16bitAsInt32(byte a, byte b) {
+//		final int newInt = ((0xFF & a) << 8) | (0xFF & b);
+//		if ((newInt & 0x00008000) > 0) {
+//			return newInt | 0xFFFF0000;
+//		}
+//		return newInt & 0x0000FFFF;
+//	}
 }
