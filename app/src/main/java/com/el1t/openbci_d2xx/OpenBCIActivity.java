@@ -66,17 +66,17 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
     TextView mDataView;
 
     StreamReader mStreamReader = new StreamReader(this);
-    AlphaDetector mAlphaDetector = new AlphaDetector(this, alphaCheckChannels.length);
+    AlphaDetector mAlphaDetector = new AlphaDetector(this);
 
 	final Handler INIT_HANDLER = new Handler() {
 		@Override
 		public void handleMessage(Message msg) {
 			final byte[] input = (byte[]) msg.obj;
 			final char[] decoded = Arrays.copyOf(Charset.forName("US-ASCII").decode(ByteBuffer.wrap(input)).array(), msg.arg1);
-			mTextView.setText(mTextView.getText() + "\n" + new String(decoded));
+			mTextView.setText(new String(decoded) + "\n" + mTextView.getText());
             if (decoded.length > 4 && decoded[decoded.length - 3] == '$' && decoded[decoded.length - 2] == '$' && decoded[decoded.length-1] == '$') {
 				mInitialized = true;
-                mTextView.setText(mTextView.getText() + " << EOT received");
+                mTextView.setText(" << EOT received" + mTextView.getText());
 				Log.d(TAG, "EOT received");
 				new Handler().postDelayed(new Runnable() {
 					@Override
@@ -91,7 +91,7 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 						writeToDevice(Commands.STOP_STREAM);
 						streaming = false;
 					}
-				}, 7000);
+				}, 20000);
 			} else {
 				Log.d(TAG, new String(decoded));
 			}
@@ -127,6 +127,9 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 					//temp.printToConsole();
                     //mDataView.setText(Double.toString(temp.values[0]));
                     Log.d(TAG, Double.toString(temp.values[0]));
+
+                    Log.e(TAG + "plskthxbi", temp.values[6] + ", " + temp.values[7]);
+
 					analyze(temp);
 				}
 				// Move data to the beginning of the buffer
@@ -210,19 +213,21 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 
 	@Override
 	public void blinkStart() {
-		mTextView.setText(mTextView.getText() + "\n" + "Blink Start");
+		mTextView.setText("Blink Start" + "\n" + mTextView.getText());
 	}
 
 	@Override
 	public void blinkEnd(double blinkDuration) {
-		mTextView.setText(mTextView.getText() + "\n" + "Blink Occurred for " + blinkDuration + " sec");
+		mTextView.setText("Blink Occurred for " + blinkDuration + " sec" + "\n" + mTextView.getText());
 	}
 
 	@Override
 	public void alpha(AlphaDetector.DetectionData_FreqDomain[] results) {
         for (int Ichan = 0; Ichan < results.length; Ichan++) {
             if (results[Ichan].isDetected) {
-                mTextView.setText(mTextView.getText() + "\n" + "Alpha Detected: Channel " + Ichan);
+                mTextView.setText("Alpha Detected: Channel " + Ichan + "\n" +  mTextView.getText());
+            } else {
+                mTextView.setText("Alpha Not Detected: Channel " + Ichan + "\n" + mTextView.getText());
             }
         }
     }
@@ -399,7 +404,7 @@ public class OpenBCIActivity extends ActionBarActivity implements BrainStateCall
 			mDevice.setLatencyTimer((byte) 16);
 			mDevice.write(new byte[]{(byte) value}, 1);
 			Log.d(TAG, "Sent '" + value + "' to device.");
-			mTextView.setText(mTextView.getText() + "\nSent '" + value + "' to device.");
+			mTextView.setText("Sent '" + value + "' to device.\n" + mTextView.getText());
 		} else {
 			Log.e(TAG, "Write: mDevice not open");
 		}
